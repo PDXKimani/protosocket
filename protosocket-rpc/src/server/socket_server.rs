@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::io::Error;
+use std::os::fd::AsRawFd;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
@@ -39,7 +40,25 @@ where
         address: std::net::SocketAddr,
         socket_server: TSocketService,
     ) -> crate::Result<Self> {
-        let listener = tokio::net::TcpListener::bind(address).await?;
+        let socket = socket2::Socket::new(
+            match address {
+                std::net::SocketAddr::V4(_) => socket2::Domain::IPV4,
+                std::net::SocketAddr::V6(_) => socket2::Domain::IPV6,
+            },
+            socket2::Type::STREAM,
+            None,
+        )?;
+
+        socket.set_nonblocking(true)?;
+        socket.set_tcp_nodelay(true)?;
+        socket.set_keepalive(true)?;
+        socket.set_reuse_port(true)?;
+        socket.set_reuse_address(true)?;
+
+        socket.bind(&address.into())?;
+        socket.listen(65535)?;
+        
+        let listener = tokio::net::TcpListener::from_std(socket.into())?;
         Ok(Self {
             socket_server,
             listener,
